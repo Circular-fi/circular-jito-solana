@@ -407,8 +407,15 @@ impl Tpu {
         let (bam_batch_sender, bam_batch_receiver) = bounded(100_000);
         let (bam_outbound_sender, bam_outbound_receiver) = mpsc::channel(100_000);
         // Exporter runs on its own thread; BAM sigverify only ever try_sends.
+        // Boot log is emitted here (solana_core) so it passes the default
+        // `solana=info,agave=info` filter; the circExporter crate's own info!
+        // lines are otherwise invisible.
         let (circular_export_sender, circular_transaction_exporter) = match circular_export_config {
             Some(config) => {
+                log::info!(
+                    "circular exporter: submitting verified transactions to Fast at {} (max_in_flight={})",
+                    config.url, config.max_in_flight
+                );
                 let (sender, exporter) =
                     CircularTransactionExporter::spawn(config, cluster_info.id().to_string());
                 (Some(sender), Some(exporter))

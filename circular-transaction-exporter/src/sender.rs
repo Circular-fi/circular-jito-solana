@@ -166,8 +166,15 @@ impl CircularExportSender {
         is_tpu_vote: bool,
         filter_simple_votes: bool,
     ) {
+        // Packet count only (no wire copy) so Grafana enqueued/dropped match
+        // the owned-path semantics on the production Arc path.
+        let transaction_count: u64 = batches.iter().map(|b| b.len() as u64).sum();
+
         if self.sender.is_full() {
             self.metrics.dropped_batches.fetch_add(1, Ordering::Relaxed);
+            self.metrics
+                .dropped_transactions
+                .fetch_add(transaction_count, Ordering::Relaxed);
             return;
         }
 
@@ -177,8 +184,18 @@ impl CircularExportSender {
             filter_simple_votes,
             received_at_unix_nanos: unix_nanos_now(),
         });
-        if self.sender.try_send(item).is_err() {
-            self.metrics.dropped_batches.fetch_add(1, Ordering::Relaxed);
+        match self.sender.try_send(item) {
+            Ok(()) => {
+                self.metrics
+                    .enqueued_transactions
+                    .fetch_add(transaction_count, Ordering::Relaxed);
+            }
+            Err(_) => {
+                self.metrics.dropped_batches.fetch_add(1, Ordering::Relaxed);
+                self.metrics
+                    .dropped_transactions
+                    .fetch_add(transaction_count, Ordering::Relaxed);
+            }
         }
     }
 
@@ -204,5 +221,48 @@ impl CircularExportSender {
             /* filter_simple_votes */ !self.include_votes,
         );
         self.record_hook(start.elapsed().as_micros() as u64, 0);
+    }
+}
+
+#[cfg(all(test, feature = "dev-context-only-utils"))]
+mod tests {
+    use {
+        super::*,
+        solana_perf::packet::to_packet_batches,
+        std::sync::atomic::Ordering,
+    };
+
+    fn make_batches(num_tx: usize) -> Arc<Vec<PacketBatch>> {
+        let payloads: Vec<Vec<u8>> = (0..num_tx).map(|i| vec![i as u8; 64]).collect();
+        Arc::new(to_packet_batches(&payloads, num_tx.max(1)))
+    }
+
+    #[test]
+    fn shared_path_increments_enqueued_transactions() {
+        let (sender, _rx) = CircularExportSender::new_for_tests(8, false);
+        let batches = make_batches(7);
+        sender.try_send_shared(batches, false);
+        assert_eq!(
+            sender.metrics().enqueued_transactions.load(Ordering::Relaxed),
+            7
+        );
+        assert_eq!(sender.metrics().dropped_batches.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn shared_path_full_queue_increments_dropped_transactions() {
+        let (sender, _rx) = CircularExportSender::new_for_tests(1, false);
+        let batches = make_batches(5);
+        sender.try_send_shared(Arc::clone(&batches), false);
+        sender.try_send_shared(batches, false);
+        assert_eq!(
+            sender.metrics().enqueued_transactions.load(Ordering::Relaxed),
+            5
+        );
+        assert_eq!(sender.metrics().dropped_batches.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            sender.metrics().dropped_transactions.load(Ordering::Relaxed),
+            5
+        );
     }
 }
