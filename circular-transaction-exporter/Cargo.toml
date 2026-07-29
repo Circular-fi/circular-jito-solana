@@ -1,0 +1,48 @@
+[package]
+name = "circular-transaction-exporter"
+description = "Circular Fast: gRPC export of BAM sigverify-verified transactions"
+publish = false
+version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+homepage = { workspace = true }
+license = { workspace = true }
+edition = { workspace = true }
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+dev-context-only-utils = []
+
+[dependencies]
+crossbeam-channel = { workspace = true }
+log = { workspace = true }
+prost = { workspace = true }
+solana-metrics = { workspace = true }
+solana-packet = { workspace = true }
+solana-perf = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
+tokio-stream = { workspace = true }
+tonic = { workspace = true, features = ["tls-ring", "tls-native-roots", "transport"] }
+tonic-prost = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+solana-perf = { workspace = true, features = ["dev-context-only-utils"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+
+[[bench]]
+name = "hook_ab"
+harness = false
+required-features = ["dev-context-only-utils"]
+
+[[test]]
+name = "burst_and_metrics"
+required-features = ["dev-context-only-utils"]
+
+[build-dependencies]
+tonic-prost-build = { workspace = true }
+
+[lints]
+workspace = true

@@ -91,6 +91,7 @@ pub fn safe_clone_config(config: &ValidatorConfig) -> ValidatorConfig {
         multicast_receiver_address: config.multicast_receiver_address.clone(),
         tip_manager_config: config.tip_manager_config.clone(),
         bam_url: config.bam_url.clone(),
+        circular_export_config: config.circular_export_config.clone(),
         disable_multicast_shred_check: config.disable_multicast_shred_check,
     }
 }

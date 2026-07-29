@@ -658,6 +658,7 @@ mod bam_manager_tests {
             batch_sender: batch_tx,
             batch_receiver: batch_rx,
             outbound_sender: outbound_tx,
+            circular_export_sender: None,
             cluster_info,
             block_builder_fee_info: Arc::new(ArcSwap::from_pointee(BlockBuilderFeeInfo::default())),
             bank_forks,

@@ -1,5 +1,6 @@
 use {
     crate::{commands, commands::run::args::pub_sub_config},
+    circular_transaction_exporter::CircularExportConfig,
     agave_snapshots::{
         DEFAULT_ARCHIVE_COMPRESSION, SnapshotVersion,
         snapshot_config::{
@@ -9,7 +10,7 @@ use {
             DEFAULT_MAX_INCREMENTAL_SNAPSHOT_ARCHIVES_TO_RETAIN,
         },
     },
-    clap::{App, AppSettings, Arg, ArgMatches, SubCommand, crate_description, crate_name},
+    clap::{App, AppSettings, Arg, ArgMatches, SubCommand, crate_description, crate_name, value_t_or_exit},
     log::warn,
     solana_accounts_db::accounts_db::{
         DEFAULT_ACCOUNTS_SHRINK_OPTIMIZE_TOTAL_SPACE, DEFAULT_ACCOUNTS_SHRINK_RATIO,
@@ -887,6 +888,7 @@ pub fn test_app<'a>(version: &'a str, default_args: &'a DefaultTestArgs) -> App<
                 ),
         )
         .args(&pub_sub_config::args(/*test_validator:*/ true))
+        .args(&crate::cli::circular_export_args())
         .arg(commands::bam::argument())
 }
 
@@ -920,9 +922,235 @@ impl Default for DefaultTestArgs {
     }
 }
 
+/// Names of every `--circular-fast-*` flag, used to detect when the operator
+/// configured the exporter but forgot the API key that enables it.
+const CIRCULAR_FAST_FLAGS: &[&str] = &[
+    "circular_fast_url",
+    "circular_fast_max_in_flight",
+    "circular_fast_request_timeout_ms",
+    "circular_fast_connect_timeout_ms",
+    "circular_fast_queue_capacity",
+    "circular_fast_cashback_address",
+    "circular_fast_memo",
+    "circular_fast_tls_ca",
+    "circular_fast_include_votes",
+];
+
+/// The `--circular-fast-*` flags, shared between `agave-validator` and
+/// `solana-test-validator`. Parse the matches with
+/// [`parse_circular_export_config`].
+///
+/// Plug & play: the exporter is enabled as soon as an API key is provided
+/// (via `--circular-fast-api-key-file` or the `CIRCULAR_FAST_API_KEY`
+/// environment variable); everything else has production-ready defaults.
+pub fn circular_export_args<'a, 'b>() -> Vec<Arg<'a, 'b>> {
+    vec![
+        Arg::with_name("circular_fast_api_key_file")
+            .long("circular-fast-api-key-file")
+            .value_name("PATH")
+            .takes_value(true)
+            .help(
+                "Circular Fast: file containing the API key sent as x-api-key on every \
+                 SendTransaction. Providing the key (here or via the CIRCULAR_FAST_API_KEY \
+                 environment variable) enables the exporter; without it the exporter is \
+                 disabled.",
+            ),
+        Arg::with_name("circular_fast_url")
+            .long("circular-fast-url")
+            .value_name("URL")
+            .takes_value(true)
+            .help(
+                "Circular Fast: gRPC endpoint that receives BAM sigverify-verified transactions \
+                 (SendTransaction, forward=false). [default: http://cashback.circular.fi]",
+            ),
+        Arg::with_name("circular_fast_max_in_flight")
+            .long("circular-fast-max-in-flight")
+            .value_name("COUNT")
+            .takes_value(true)
+            .validator(is_parsable::<usize>)
+            .help(
+                "Circular Fast: maximum concurrent in-flight SendTransaction calls. When \
+                 saturated, transactions are dropped rather than queued. [default: 1024]",
+            ),
+        Arg::with_name("circular_fast_request_timeout_ms")
+            .long("circular-fast-request-timeout-ms")
+            .value_name("MS")
+            .takes_value(true)
+            .validator(is_parsable::<u64>)
+            .help("Circular Fast: timeout of a single SendTransaction call. [default: 2000]"),
+        Arg::with_name("circular_fast_connect_timeout_ms")
+            .long("circular-fast-connect-timeout-ms")
+            .value_name("MS")
+            .takes_value(true)
+            .validator(is_parsable::<u64>)
+            .help("Circular Fast: timeout of a single gRPC connection attempt. [default: 5000]"),
+        Arg::with_name("circular_fast_queue_capacity")
+            .long("circular-fast-queue-capacity")
+            .value_name("COUNT")
+            .takes_value(true)
+            .validator(is_parsable::<usize>)
+            .help(
+                "Circular Fast: capacity, in packet batches, of the queue between BAM sigverify and \
+                 the exporter thread. New batches are dropped when the queue is full. [default: \
+                 8192]",
+            ),
+        Arg::with_name("circular_fast_cashback_address")
+            .long("circular-fast-cashback-address")
+            .value_name("PUBKEY")
+            .takes_value(true)
+            .validator(is_pubkey)
+            .help("Circular Fast: optional cashback destination pubkey."),
+        Arg::with_name("circular_fast_memo")
+            .long("circular-fast-memo")
+            .value_name("STRING")
+            .takes_value(true)
+            .help("Circular Fast: optional memo attached to every submission."),
+        Arg::with_name("circular_fast_tls_ca")
+            .long("circular-fast-tls-ca")
+            .value_name("PATH")
+            .takes_value(true)
+            .help(
+                "Circular Fast: custom root CA certificate (PEM) used to verify the endpoint's \
+                 TLS certificate. TLS is enabled automatically for https:// URLs.",
+            ),
+        Arg::with_name("circular_fast_include_votes")
+            .long("circular-fast-include-votes")
+            .takes_value(false)
+            .help("Circular Fast: also export BAM vote transactions. Excluded by default."),
+    ]
+}
+
+/// Build the [`CircularExportConfig`] from matches produced by
+/// [`circular_export_args`]. Returns `Ok(None)` when the exporter is disabled
+/// (no API key provided).
+pub fn parse_circular_export_config(
+    matches: &ArgMatches,
+) -> Result<Option<CircularExportConfig>, Box<dyn std::error::Error>> {
+    let api_key = match matches.value_of("circular_fast_api_key_file") {
+        Some(path) => Some(
+            std::fs::read_to_string(path)
+                .map_err(|err| format!("unable to read circular Fast API key file: {err}"))?
+                .trim()
+                .to_string(),
+        ),
+        None => std::env::var("CIRCULAR_FAST_API_KEY")
+            .ok()
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty()),
+    };
+
+    let Some(api_key) = api_key else {
+        // Fail loudly if the operator configured the exporter but forgot the
+        // key, rather than silently disabling it.
+        if CIRCULAR_FAST_FLAGS
+            .iter()
+            .any(|flag| matches.is_present(flag))
+        {
+            return Err("Circular Fast export requires an API key: pass \
+                        --circular-fast-api-key-file <PATH> or set CIRCULAR_FAST_API_KEY"
+                .into());
+        }
+        return Ok(None);
+    };
+    if api_key.is_empty() {
+        return Err("Circular Fast API key file is empty".into());
+    }
+
+    let mut config = CircularExportConfig {
+        api_key,
+        cashback_address: matches
+            .value_of("circular_fast_cashback_address")
+            .map(String::from),
+        memo: matches.value_of("circular_fast_memo").map(String::from),
+        tls_ca_path: matches.value_of("circular_fast_tls_ca").map(PathBuf::from),
+        include_votes: matches.is_present("circular_fast_include_votes"),
+        ..CircularExportConfig::default()
+    };
+    if let Some(url) = matches.value_of("circular_fast_url") {
+        config.url = url.to_string();
+    }
+    if matches.is_present("circular_fast_max_in_flight") {
+        config.max_in_flight = value_t_or_exit!(matches, "circular_fast_max_in_flight", usize);
+    }
+    if matches.is_present("circular_fast_queue_capacity") {
+        config.queue_capacity = value_t_or_exit!(matches, "circular_fast_queue_capacity", usize);
+    }
+    if matches.is_present("circular_fast_request_timeout_ms") {
+        config.request_timeout = std::time::Duration::from_millis(value_t_or_exit!(
+            matches,
+            "circular_fast_request_timeout_ms",
+            u64
+        ));
+    }
+    if matches.is_present("circular_fast_connect_timeout_ms") {
+        config.connect_timeout = std::time::Duration::from_millis(value_t_or_exit!(
+            matches,
+            "circular_fast_connect_timeout_ms",
+            u64
+        ));
+    }
+
+    Ok(Some(config))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+
+
+        fn circular_matches(argv: &[&str]) -> ArgMatches<'static> {
+        App::new("test")
+            .args(&circular_export_args())
+            .get_matches_from(std::iter::once("test").chain(argv.iter().copied()))
+    }
+
+    #[test]
+    fn circular_fast_export_enablement_and_defaults() {
+        // Env is process-global; clear any ambient key so the assertions are
+        // deterministic (validator crate is edition 2021, so this is safe).
+        std::env::remove_var("CIRCULAR_FAST_API_KEY");
+
+        // No key and no flags: exporter disabled.
+        assert!(
+            parse_circular_export_config(&circular_matches(&[]))
+                .unwrap()
+                .is_none()
+        );
+
+        // Flags set but no key: hard error rather than silent disable.
+        assert!(
+            parse_circular_export_config(&circular_matches(&[
+                "--circular-fast-url",
+                "http://example.test:1",
+            ]))
+            .is_err()
+        );
+
+        // API key file enables the exporter, trims the key, applies defaults,
+        // and honors overrides.
+        let key_path = std::env::temp_dir().join("circular-fast-cli-test.key");
+        std::fs::write(&key_path, "  secret-key\n").unwrap();
+        let config = parse_circular_export_config(&circular_matches(&[
+            "--circular-fast-api-key-file",
+            key_path.to_str().unwrap(),
+            "--circular-fast-max-in-flight",
+            "42",
+            "--circular-fast-request-timeout-ms",
+            "1500",
+        ]))
+        .unwrap()
+        .expect("exporter should be enabled when a key is provided");
+        std::fs::remove_file(&key_path).ok();
+
+        assert_eq!(config.api_key, "secret-key");
+        assert_eq!(config.url, CircularExportConfig::default().url);
+        assert_eq!(config.max_in_flight, 42);
+        assert_eq!(
+            config.request_timeout,
+            std::time::Duration::from_millis(1500)
+        );
+        assert!(!config.include_votes);
+    }
 
     #[test]
     fn make_sure_deprecated_arguments_are_sorted_alphabetically() {
@@ -955,4 +1183,6 @@ mod test {
             );
         }
     }
+
+
 }

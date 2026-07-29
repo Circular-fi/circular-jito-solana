@@ -20,6 +20,7 @@ agave-snapshots = { workspace = true }
 arc-swap.workspace = true
 base64 = { workspace = true }
 bincode = { workspace = true }
+circular-transaction-exporter = { workspace = true }
 crossbeam-channel = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }

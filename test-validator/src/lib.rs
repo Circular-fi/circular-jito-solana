@@ -6,6 +6,7 @@ use {
     },
     arc_swap::ArcSwap,
     base64::{Engine, prelude::BASE64_STANDARD},
+    circular_transaction_exporter::CircularExportConfig,
     crossbeam_channel::Receiver,
     log::*,
     solana_account::{Account, AccountSharedData, ReadableAccount, WritableAccount},
@@ -151,6 +152,7 @@ pub struct TestValidatorGenesis {
     pub geyser_plugin_manager: Arc<ArcSwap<GeyserPluginManager>>,
     admin_rpc_service_post_init: Arc<RwLock<Option<AdminRpcRequestMetadataPostInit>>>,
     pub bam_url: Arc<ArcSwap<Option<String>>>,
+    pub circular_export_config: Option<CircularExportConfig>,
 }
 
 impl Default for TestValidatorGenesis {
@@ -188,6 +190,7 @@ impl Default for TestValidatorGenesis {
             admin_rpc_service_post_init:
                 Arc::<RwLock<Option<AdminRpcRequestMetadataPostInit>>>::default(),
             bam_url: Arc::new(ArcSwap::from_pointee(None)),
+            circular_export_config: None,
         }
     }
 }
@@ -1159,6 +1162,7 @@ impl TestValidator {
                 },
             },
             bam_url: config.bam_url.clone(),
+            circular_export_config: config.circular_export_config.clone(),
             ..ValidatorConfig::default_for_test()
         };
         if let Some(ref tower_storage) = config.tower_storage {
