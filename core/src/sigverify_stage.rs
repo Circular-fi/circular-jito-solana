@@ -13,6 +13,7 @@ use {
         },
     },
     agave_banking_stage_ingress_types::BankingPacketBatch,
+    circular_transaction_exporter::CircularExportSender,
     core::time::Duration,
     crossbeam_channel::{Receiver, RecvTimeoutError, Sender, unbounded},
     solana_measure::measure::Measure,
@@ -186,6 +187,7 @@ impl SigVerifierStats {
 }
 
 impl SigVerifyStage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         packet_receiver: Receiver<PacketBatch>,
         vote_packet_receiver: Receiver<PacketBatch>,
@@ -195,6 +197,7 @@ impl SigVerifyStage {
         num_workers: NonZeroUsize,
         forward_non_votes: bool,
         sharable_banks: SharableBanks,
+        circular_export_sender: Option<CircularExportSender>,
     ) -> (Self, GossipSigVerifyHandle) {
         let (gossip_verified_vote_sender, verified_vote_receiver) = unbounded();
         let non_vote_stats = SigVerifierStats::default();
@@ -215,6 +218,7 @@ impl SigVerifyStage {
                 total_valid_packets: tpu_vote_stats.total_valid_packets.clone(),
                 total_verify_time_us: tpu_vote_stats.total_verify_time_us.clone(),
             },
+            circular_export_sender,
         );
         let non_vote_thread_hdl = Self::verifier_service(
             packet_receiver,
@@ -452,6 +456,7 @@ mod tests {
             NonZeroUsize::new(4).unwrap(),
             false,
             sharable_banks,
+            None,
         );
 
         let now = Instant::now();
@@ -526,6 +531,7 @@ mod tests {
             NonZeroUsize::new(1).unwrap(),
             false,
             sharable_banks,
+            None,
         );
 
         let mut bytes_batch = BytesPacketBatch::with_capacity(1);

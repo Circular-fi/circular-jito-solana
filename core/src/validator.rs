@@ -1,7 +1,11 @@
 //! The `validator` module hosts all the validator microservices.
 
 pub use solana_perf::report_target_features;
-use {crate::tip_manager::TipManagerConfig, solana_turbine::ShredReceiverAddresses};
+use {
+    crate::tip_manager::TipManagerConfig,
+    circular_transaction_exporter::CircularExportConfig,
+    solana_turbine::ShredReceiverAddresses,
+};
 use {
     crate::{
         admin_rpc_post_init::{AdminRpcRequestMetadataPostInit, KeyUpdaterType, KeyUpdaters},
@@ -413,6 +417,8 @@ pub struct ValidatorConfig {
     pub multicast_receiver_address: Arc<ArcSwap<Option<SocketAddr>>>,
     pub tip_manager_config: TipManagerConfig,
     pub bam_url: Arc<ArcSwap<Option<String>>>,
+    /// Optional Circular Fast exporter for BAM-received transactions.
+    pub circular_export_config: Option<CircularExportConfig>,
     /// Skips automatic multicast route detection and multicast receiver updates.
     pub disable_multicast_shred_check: bool,
 }
@@ -509,6 +515,7 @@ impl ValidatorConfig {
             multicast_receiver_address: Arc::new(ArcSwap::from_pointee(None)),
             tip_manager_config: TipManagerConfig::default(),
             bam_url: Arc::new(ArcSwap::from_pointee(None)),
+            circular_export_config: None,
             disable_multicast_shred_check: false,
         }
     }
@@ -1763,6 +1770,7 @@ impl Validator {
             bam_shred_receiver_addresses,
             config.multicast_receiver_address.clone(),
             config.bam_url.clone(),
+            config.circular_export_config.clone(),
         );
 
         datapoint_info!(

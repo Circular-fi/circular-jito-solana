@@ -5,6 +5,7 @@
 use {
     crate::{banking_trace::BankingPacketSender, sigverify_stage::SigVerifyServiceError},
     agave_banking_stage_ingress_types::BankingPacketBatch,
+    circular_transaction_exporter::CircularExportSender,
     crossbeam_channel::{Receiver, Sender, TrySendError, bounded},
     solana_measure::measure_us,
     solana_perf::{
@@ -136,6 +137,10 @@ struct WorkerPoolChannels {
     sharable_banks: SharableBanks,
     non_vote_stats: SigVerifyWorkerStats,
     tpu_vote_stats: SigVerifyWorkerStats,
+    /// Circular Fast export hook. `None` when the exporter is disabled.
+    /// Native TPU votes are never exported regardless (see
+    /// `CircularExportSender::export_verified`).
+    circular_export_sender: Option<CircularExportSender>,
 }
 
 pub(crate) struct SigVerifyWorkerPool {
@@ -158,6 +163,7 @@ impl Drop for SigVerifyWorkerPool {
 }
 
 impl SigVerifyWorkerPool {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         num_workers: NonZeroUsize,
         non_vote_banking_sender: BankingPacketSender,
@@ -168,6 +174,7 @@ impl SigVerifyWorkerPool {
         sharable_banks: SharableBanks,
         non_vote_stats: SigVerifyWorkerStats,
         tpu_vote_stats: SigVerifyWorkerStats,
+        circular_export_sender: Option<CircularExportSender>,
     ) -> Self {
         let (non_vote_sender, non_vote_receiver) = bounded(SIGVERIFY_NON_VOTE_WORK_CHANNEL_SIZE);
         let (tpu_vote_sender, tpu_vote_receiver) = bounded(SIGVERIFY_TPU_VOTE_WORK_CHANNEL_SIZE);
@@ -183,6 +190,7 @@ impl SigVerifyWorkerPool {
             sharable_banks,
             non_vote_stats,
             tpu_vote_stats,
+            circular_export_sender,
         };
         let exit = Arc::new(AtomicBool::new(false));
         let worker_hdls = (0..num_workers.get())
@@ -241,6 +249,7 @@ impl SigVerifyWorkerPool {
                         false,
                         &channels.sharable_banks,
                         &channels.non_vote_stats,
+                        channels.circular_export_sender.as_ref(),
                     ),
                     Err(_) => false,
                 }
@@ -256,6 +265,7 @@ impl SigVerifyWorkerPool {
                         true,
                         &channels.sharable_banks,
                         &channels.tpu_vote_stats,
+                        channels.circular_export_sender.as_ref(),
                     ),
                     Err(_) => false,
                 }
@@ -273,6 +283,7 @@ impl SigVerifyWorkerPool {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_transaction_task(
         mut work: TransactionVerifyTask,
         reject_non_vote: bool,
@@ -282,6 +293,7 @@ impl SigVerifyWorkerPool {
         is_tpu_vote: bool,
         sharable_banks: &SharableBanks,
         stats: &SigVerifyWorkerStats,
+        circular_export_sender: Option<&CircularExportSender>,
     ) -> bool {
         let enable_tx_v1 = sharable_banks.working().feature_set.snapshot().enable_tx_v1;
         let (_, verify_time_us) = measure_us!(sigverify::ed25519_verify_serial(
@@ -298,6 +310,13 @@ impl SigVerifyWorkerPool {
             .fetch_add(verify_time_us as usize, Ordering::Relaxed);
 
         let banking_packet_batch = BankingPacketBatch::new(vec![work.batch]);
+        // Circular Arc hook: share the post-sigverify batch with the exporter
+        // (refcount bump only). Vote filtering + wire copy run on the
+        // circExporter thread; `is_tpu_vote` still short-circuits the whole
+        // hook for the tpu-vote channel.
+        if let Some(exporter) = circular_export_sender {
+            exporter.export_verified(&banking_packet_batch, is_tpu_vote);
+        }
         if let Err(err) = banking_stage_sender.send(banking_packet_batch.clone()) {
             error!("sigverify send failed: {err:?}");
             return false;

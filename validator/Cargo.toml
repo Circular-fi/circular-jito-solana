@@ -24,6 +24,7 @@ agave-votor = { workspace = true }
 agave-xdp = { workspace = true }
 arc-swap = { workspace = true }
 chrono = { workspace = true, features = ["default", "serde"] }
+circular-transaction-exporter = { workspace = true }
 clap = { workspace = true }
 console = { workspace = true }
 core_affinity = { workspace = true }

@@ -1,5 +1,6 @@
 use {
     crate::packet_bundle::{PacketBundle, VerifiedPacketBundle},
+    circular_transaction_exporter::CircularExportSender,
     crossbeam_channel::{Receiver, RecvTimeoutError, Sender},
     rayon::ThreadPool,
     solana_perf::sigverify::ed25519_verify,
@@ -23,8 +24,11 @@ impl BundleSigverifyStage {
         receiver: Receiver<Vec<PacketBundle>>,
         sender: Sender<VerifiedPacketBundle>,
         exit: Arc<AtomicBool>,
+        circular_export_sender: Option<CircularExportSender>,
     ) -> Self {
-        let thread = spawn(move || Self::sigverify_service(thread_pool, receiver, sender, exit));
+        let thread = spawn(move || {
+            Self::sigverify_service(thread_pool, receiver, sender, exit, circular_export_sender)
+        });
         Self { thread }
     }
 
@@ -37,6 +41,7 @@ impl BundleSigverifyStage {
         receiver: Receiver<Vec<PacketBundle>>,
         sender: Sender<VerifiedPacketBundle>,
         exit: Arc<AtomicBool>,
+        circular_export_sender: Option<CircularExportSender>,
     ) {
         let mut workspace = Vec::with_capacity(100);
 
@@ -102,14 +107,23 @@ impl BundleSigverifyStage {
 
                 // all the transactions in the bundle need to be verified to be valid
                 let len = bundle.len();
-                if num_packets_failed_sigverify_in_bundle == 0
-                    && sender.send(VerifiedPacketBundle::new(bundle)).is_err()
-                {
-                    warn!("failed to send verified packet bundle");
-                    num_bundles_failed_send += 1;
-                    num_packets_failed_send += len;
-                    break;
-                } else if num_packets_failed_sigverify_in_bundle > 0 {
+                if num_packets_failed_sigverify_in_bundle == 0 {
+                    // Classic (non-BAM) Jito bundle export hook. One clone of
+                    // this bundle's (small, capped) PacketBatch: unlike the
+                    // native TPU/BAM hooks, `VerifiedPacketBundle` owns its
+                    // `PacketBatch` directly rather than behind an `Arc`, and
+                    // bundle volume is far lower than the TPU firehose, so a
+                    // zero-copy refactor isn't worth it here.
+                    if let Some(exporter) = circular_export_sender.as_ref() {
+                        exporter.export_jito_bundle_shared(Arc::new(vec![bundle.clone()]));
+                    }
+                    if sender.send(VerifiedPacketBundle::new(bundle)).is_err() {
+                        warn!("failed to send verified packet bundle");
+                        num_bundles_failed_send += 1;
+                        num_packets_failed_send += len;
+                        break;
+                    }
+                } else {
                     num_bundles_failed_sigverify += 1;
                     num_packets_failed_sigverify += num_packets_failed_sigverify_in_bundle;
                 }
@@ -171,6 +185,7 @@ mod tests {
             unverified_receiver,
             verified_sender,
             exit.clone(),
+            None,
         );
         exit.store(true, Ordering::Relaxed);
         stage.join().unwrap();
@@ -214,6 +229,7 @@ mod tests {
             unverified_receiver,
             verified_sender,
             exit.clone(),
+            None,
         );
 
         let verified_bundle_1 = verified_receiver.recv().unwrap();
@@ -277,6 +293,7 @@ mod tests {
             unverified_receiver,
             verified_sender,
             exit.clone(),
+            None,
         );
 
         assert_eq!(

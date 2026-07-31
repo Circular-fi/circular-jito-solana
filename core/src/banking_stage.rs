@@ -699,6 +699,7 @@ impl BankingStage {
                             bam_scheduler_bank_forks.clone(),
                             Some(bam_shared_leader_state),
                             jito_filter_keys.as_ref().clone(),
+                            bam_dependencies.circular_export_sender.clone(),
                         );
 
                         let bam_sharable_banks =
