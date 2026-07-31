@@ -21,6 +21,7 @@ dev-context-only-utils = [
     "agave-banking-stage-ingress-types/dev-context-only-utils",
     "agave-bls-sigverify/dev-context-only-utils",
     "agave-votor/dev-context-only-utils",
+    "circular-transaction-exporter/dev-context-only-utils",
     "solana-entry/dev-context-only-utils",
     "solana-ledger/dev-context-only-utils",
     "solana-perf/dev-context-only-utils",
@@ -76,6 +77,7 @@ bs58 = { workspace = true }
 bytemuck = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true, features = ["default", "serde"] }
+circular-transaction-exporter = { workspace = true }
 crossbeam-channel = { workspace = true }
 dashmap = { workspace = true, features = ["rayon", "raw-api"] }
 futures = { workspace = true }

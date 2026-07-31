@@ -1396,6 +1396,7 @@ mod tests {
             bank_forks.clone(),
             None,
             HashSet::default(),
+            None,
         );
 
         let (consume_work_sender, consume_work_receiver) = unbounded();

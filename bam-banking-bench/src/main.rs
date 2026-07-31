@@ -129,6 +129,7 @@ fn main() {
         batch_sender: batch_sender.clone(),
         batch_receiver,
         outbound_sender,
+        circular_export_sender: None,
         cluster_info: Arc::new(ClusterInfo::new(
             ContactInfo::new_localhost(&keypair.pubkey(), timestamp()),
             Arc::new(keypair),
