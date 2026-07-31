@@ -393,6 +393,7 @@ dependencies = [
  "bytesize",
  "caps",
  "chrono",
+ "circular-transaction-exporter",
  "clap 2.33.3",
  "console 0.16.3",
  "crossbeam-channel",
@@ -1963,6 +1964,46 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common 0.1.6",
  "inout",
+]
+
+[[package]]
+name = "circular-grpc-test-receiver"
+version = "4.1.2"
+dependencies = [
+ "bincode",
+ "bs58",
+ "circular-transaction-exporter",
+ "hex",
+ "serde_json",
+ "solana-client",
+ "solana-connection-cache",
+ "solana-hash 4.3.0",
+ "solana-keypair",
+ "solana-rpc-client",
+ "solana-sha256-hasher",
+ "solana-signer",
+ "solana-system-transaction",
+ "solana-transaction",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
+name = "circular-transaction-exporter"
+version = "4.1.2"
+dependencies = [
+ "criterion",
+ "crossbeam-channel",
+ "log",
+ "prost 0.14.3",
+ "solana-metrics",
+ "solana-packet 4.1.0",
+ "solana-perf",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]
@@ -8312,6 +8353,7 @@ dependencies = [
  "bytemuck",
  "bytes",
  "chrono",
+ "circular-transaction-exporter",
  "criterion",
  "crossbeam-channel",
  "dashmap",
@@ -11491,6 +11533,7 @@ dependencies = [
  "arc-swap",
  "base64 0.22.1",
  "bincode",
+ "circular-transaction-exporter",
  "crossbeam-channel",
  "log",
  "serde_json",

@@ -4,6 +4,7 @@ use std::sync::{Arc, atomic::AtomicU8};
 use {
     crate::proxy::block_engine_stage::BlockBuilderFeeInfo,
     arc_swap::ArcSwap,
+    circular_transaction_exporter::CircularExportSender,
     jito_protos::proto::{
         bam_api::{SchedulerMessage, SchedulerMessageV0, scheduler_message::VersionedMsg},
         bam_types,
@@ -48,6 +49,9 @@ pub struct BamDependencies {
     pub batch_receiver: crossbeam_channel::Receiver<bam_types::MultipleAtomicTxnBatch>,
 
     pub outbound_sender: mpsc::Sender<BamOutboundMessage>,
+
+    /// Optional Circular Fast exporter handle for post-sigverify BAM txs.
+    pub circular_export_sender: Option<CircularExportSender>,
 
     pub cluster_info: Arc<ClusterInfo>,
     pub block_builder_fee_info: Arc<ArcSwap<BlockBuilderFeeInfo>>,

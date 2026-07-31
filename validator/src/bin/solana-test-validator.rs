@@ -453,6 +453,11 @@ fn main() {
             exit(1);
         }),
     ));
+    genesis.circular_export_config =
+        cli::parse_circular_export_config(&matches).unwrap_or_else(|err| {
+            eprintln!("failed to parse circular Fast export configuration: {err}");
+            exit(1);
+        });
     admin_rpc_service::run(
         &ledger_path,
         admin_rpc_service::AdminRpcRequestMetadata {

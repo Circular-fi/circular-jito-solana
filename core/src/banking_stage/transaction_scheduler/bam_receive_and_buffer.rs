@@ -30,6 +30,7 @@ use {
     },
     ahash::HashSet,
     bytes::Bytes,
+    circular_transaction_exporter::CircularExportSender,
     crossbeam_channel::{RecvTimeoutError, TryRecvError},
     histogram::Histogram,
     itertools::Itertools,
@@ -98,6 +99,7 @@ impl BamReceiveAndBuffer {
         bank_forks: Arc<RwLock<BankForks>>,
         shared_leader_state: Option<SharedLeaderState>,
         blacklisted_accounts: HashSet<Pubkey>,
+        circular_export_sender: Option<CircularExportSender>,
     ) -> Self {
         let (parsed_batch_sender, parsed_batch_receiver) =
             crossbeam_channel::unbounded::<ParsedBatch>();
@@ -118,6 +120,7 @@ impl BamReceiveAndBuffer {
                 bank_forks,
                 shared_leader_state,
                 blacklisted_accounts,
+                circular_export_sender,
             )
         });
 
@@ -142,6 +145,7 @@ impl BamReceiveAndBuffer {
         bank_forks: Arc<RwLock<BankForks>>,
         shared_leader_state: Option<SharedLeaderState>,
         blacklisted_accounts: HashSet<Pubkey>,
+        circular_export_sender: Option<CircularExportSender>,
     ) {
         let sigverify_thread_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
@@ -198,6 +202,7 @@ impl BamReceiveAndBuffer {
                 &mut prevalidated,
                 &mut packet_batches,
                 &mut verify_results,
+                circular_export_sender.as_ref(),
             ));
             stats.accumulate(deserialize_stats);
             metrics.increment_total_us(duration_us);
@@ -657,6 +662,7 @@ impl BamReceiveAndBuffer {
         prevalidated: &mut Vec<PrevalidationResult>,
         packet_batches: &mut Vec<solana_perf::packet::PacketBatch>,
         results: &mut Vec<VerifyResult>,
+        circular_export_sender: Option<&CircularExportSender>,
     ) -> ReceivingStats {
         let stats = Self::prevalidate_batches(atomic_txn_batches, current_slot, prevalidated);
 
@@ -727,7 +733,19 @@ impl BamReceiveAndBuffer {
         for pre_result in prevalidated.drain(..) {
             let result = pre_result.and_then(|(revert_on_error, seq_id, max_schedule_slot)| {
                 let batch = packet_batch_iter.next().unwrap();
-                let solana_perf::packet::PacketBatch::Bytes(batch) = batch else {
+
+                // Circular Arc hook: share the post-sigverify batch with the
+                // exporter (refcount bump only). Vote filtering + wire copy
+                // run on the circExporter thread. `revert_on_error` tells the
+                // exporter whether this AtomicTxnBatch is an atomic
+                // multi-transaction batch (BAM's equivalent of a bundle,
+                // memo BAM_BUNDLE) or a single transaction (memo BAM_TPU).
+                let shared = Arc::new(vec![batch]);
+                if let Some(exporter) = circular_export_sender {
+                    exporter.export_bam_shared(shared.clone(), revert_on_error);
+                }
+
+                let solana_perf::packet::PacketBatch::Bytes(batch) = &shared[0] else {
                     unreachable!("BAM sigverify builds Bytes packet batches");
                 };
 
@@ -1115,6 +1133,7 @@ mod tests {
             bank_forks,
             None,
             blacklisted_accounts,
+            None,
         );
         let container = TransactionStateContainer::with_capacity(100);
         (exit, receive_and_buffer, container, response_receiver)
@@ -1165,6 +1184,7 @@ mod tests {
             &mut prevalidated,
             &mut packet_batches,
             &mut results,
+            None,
         );
         (results, stats)
     }
