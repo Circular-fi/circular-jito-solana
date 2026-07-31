@@ -1221,6 +1221,7 @@ pub fn add_args<'a>(app: App<'a, 'a>, default_args: &'a DefaultArgs) -> App<'a, 
             .help(DefaultSchedulerPool::cli_message()),
     )
     .arg(bam::argument())
+    .args(&crate::cli::circular_export_args())
     .arg(
         Arg::with_name("block_engine_url")
             .long("block-engine-url")
