@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package fast_tx;
+
+// Circular "Fast" transaction submission contract.
+//
+// The validator is the gRPC client. Every sigverify-verified (non-vote)
+// transaction is submitted with a single unary SendTransaction call, with
+// forward = false so it is routed to the ARB stream only (no full Fast
+// processing). Authentication uses the x-api-key metadata, the same key as
+// the Fast HTTP API.
+//
+// This mirrors the published Fast gRPC contract byte-for-byte so a validator
+// is plug & play against the production endpoint.
+service FastTx {
+  rpc SendTransaction(SendTransactionRequest) returns (SendTransactionResponse);
+}
+
+message SendTransactionRequest {
+  // Raw serialized transaction bytes (bincode-encoded VersionedTransaction).
+  // This is exactly the Solana TPU wire payload, forwarded unchanged.
+  bytes transaction = 1;
+  optional string memo = 3;
+  // Must be false for this integration: ARB stream only, no full Fast
+  // processing.
+  optional bool forward = 4;
+  optional string cashback_address = 5;
+}
+
+message SendTransactionResponse {
+  string signature = 1;
+  optional string bundle_id = 2;
+  string request_id = 3;
+}
