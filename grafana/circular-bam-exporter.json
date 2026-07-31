@@ -1,0 +1,308 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Circular Fast exporter",
+      "type": "row"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "local-influxdb",
+      "fill": 1,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "id": 2,
+      "legend": { "avg": true, "current": true, "max": true, "min": false, "show": true, "total": false, "values": true },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "query": "SELECT mean(\"received_transactions\") AS received, mean(\"enqueued_transactions\") AS enqueued, mean(\"sent_ok\") AS sent_ok, mean(\"sent_err\") AS sent_err FROM \"testnet\".\"autogen\".\"circular_transaction_exporter\" WHERE $timeFilter GROUP BY time($__interval) fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "thresholds": [],
+      "title": "Throughput (recv / enqueue / sent)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "mode": "time", "show": true },
+      "yaxes": [
+        { "format": "short", "label": "count / interval", "logBase": 1, "min": "0", "show": true },
+        { "format": "short", "show": false }
+      ],
+      "yaxis": { "align": false }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "local-influxdb",
+      "fill": 1,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "id": 3,
+      "legend": { "avg": true, "current": true, "max": true, "min": false, "show": true, "total": false, "values": true },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "query": "SELECT mean(\"dropped_batches\") AS dropped_batches, mean(\"dropped_transactions\") AS dropped_tx, mean(\"dropped_no_permit\") AS no_permit, mean(\"dropped_timeout\") AS timeout FROM \"testnet\".\"autogen\".\"circular_transaction_exporter\" WHERE $timeFilter GROUP BY time($__interval) fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "thresholds": [],
+      "title": "Drops (queue / in-flight / timeout)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "mode": "time", "show": true },
+      "yaxes": [
+        { "format": "short", "label": "drops", "logBase": 1, "min": "0", "show": true },
+        { "format": "short", "show": false }
+      ],
+      "yaxis": { "align": false }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "local-influxdb",
+      "fill": 1,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "id": 4,
+      "legend": { "avg": true, "current": true, "max": true, "min": false, "show": true, "total": false, "values": true },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "query": "SELECT mean(\"queue_depth\") AS queue_depth, mean(\"queue_capacity\") AS queue_capacity, mean(\"in_flight\") AS in_flight FROM \"testnet\".\"autogen\".\"circular_transaction_exporter\" WHERE $timeFilter GROUP BY time($__interval) fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "thresholds": [],
+      "title": "Queue depth / capacity / in-flight",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "mode": "time", "show": true },
+      "yaxes": [
+        { "format": "short", "label": "count", "logBase": 1, "min": "0", "show": true },
+        { "format": "short", "show": false }
+      ],
+      "yaxis": { "align": false }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "local-influxdb",
+      "fill": 1,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "id": 5,
+      "legend": { "avg": true, "current": true, "max": true, "min": false, "show": true, "total": false, "values": true },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "query": "SELECT mean(\"hook_us\") AS hook_us, mean(\"send_us\") AS send_us, mean(\"copy_bytes\") AS copy_bytes, mean(\"sent_bytes\") AS sent_bytes FROM \"testnet\".\"autogen\".\"circular_transaction_exporter\" WHERE $timeFilter GROUP BY time($__interval) fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "thresholds": [],
+      "title": "Latency & bytes (hook_us / send_us)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "mode": "time", "show": true },
+      "yaxes": [
+        { "format": "short", "label": "us / bytes", "logBase": 1, "min": "0", "show": true },
+        { "format": "short", "show": false }
+      ],
+      "yaxis": { "align": false }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "id": 6,
+      "title": "BAM baseline (receive path)",
+      "type": "row"
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "local-influxdb",
+      "fill": 1,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "id": 7,
+      "legend": { "avg": true, "current": true, "max": true, "min": false, "show": true, "total": false, "values": true },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "query": "SELECT mean(\"total_verify_time_us\") AS verify_us, mean(\"total_packets_verified\") AS packets, mean(\"verify_batches_pp_us_p50\") AS p50, mean(\"verify_batches_pp_us_p90\") AS p90 FROM \"testnet\".\"autogen\".\"bam-receive-and-buffer_sigverify-stats\" WHERE $timeFilter GROUP BY time($__interval) fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "thresholds": [],
+      "title": "BAM sigverify",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "mode": "time", "show": true },
+      "yaxes": [
+        { "format": "short", "label": "us / packets", "logBase": 1, "min": "0", "show": true },
+        { "format": "short", "show": false }
+      ],
+      "yaxis": { "align": false }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "local-influxdb",
+      "fill": 1,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+      "id": 8,
+      "legend": { "avg": true, "current": true, "max": true, "min": false, "show": true, "total": false, "values": true },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "query": "SELECT mean(\"total_us\") AS total_us, mean(\"sanitization_us\") AS sanitization_us, mean(\"resolution_us\") AS resolution_us FROM \"testnet\".\"autogen\".\"bam-receive-and-buffer\" WHERE $timeFilter GROUP BY time($__interval) fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "thresholds": [],
+      "title": "BAM receive-and-buffer parse",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "mode": "time", "show": true },
+      "yaxes": [
+        { "format": "µs", "label": "us", "logBase": 1, "min": "0", "show": true },
+        { "format": "short", "show": false }
+      ],
+      "yaxis": { "align": false }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": "local-influxdb",
+      "fill": 1,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 26 },
+      "id": 9,
+      "legend": { "avg": false, "current": true, "max": true, "min": false, "show": true, "total": false, "values": true },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "query": "SELECT mean(\"bundle_received\") AS bundle_received, mean(\"heartbeat_received\") AS heartbeat_received, mean(\"leaderstate_sent\") AS leaderstate_sent, mean(\"bundleresult_sent\") AS bundleresult_sent FROM \"testnet\".\"autogen\".\"bam_connection-metrics\" WHERE $timeFilter GROUP BY time($__interval) fill(none)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "thresholds": [],
+      "title": "BAM connection (bundle_received should rise when leader)",
+      "tooltip": { "shared": true, "sort": 0, "value_type": "individual" },
+      "type": "graph",
+      "xaxis": { "mode": "time", "show": true },
+      "yaxes": [
+        { "format": "short", "label": "count", "logBase": 1, "min": "0", "show": true },
+        { "format": "short", "show": false }
+      ],
+      "yaxis": { "align": false }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 27,
+  "style": "dark",
+  "tags": ["circular", "bam"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30m", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Circular Fast + BAM",
+  "uid": "circular-bam-exporter",
+  "version": 1
+}

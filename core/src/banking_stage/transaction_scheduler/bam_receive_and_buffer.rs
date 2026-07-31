@@ -30,6 +30,7 @@ use {
     },
     ahash::HashSet,
     bytes::Bytes,
+    circular_transaction_exporter::CircularExportSender,
     crossbeam_channel::{RecvTimeoutError, TryRecvError},
     histogram::Histogram,
     itertools::Itertools,
@@ -43,8 +44,11 @@ use {
     solana_clock::{MAX_PROCESSING_AGE, Slot},
     solana_measure::{measure::Measure, measure_us},
     solana_message::v1::{MAX_TRANSACTION_SIZE, V1_PREFIX},
-    solana_packet::PACKET_DATA_SIZE,
-    solana_perf::sigverify::verify_transaction_view,
+    solana_packet::{Meta, PACKET_DATA_SIZE, PacketFlags},
+    solana_perf::{
+        packet::{BytesPacket, PacketBatch},
+        sigverify::verify_transaction_view,
+    },
     solana_poh::poh_recorder::SharedLeaderState,
     solana_pubkey::Pubkey,
     solana_runtime::{bank::Bank, bank_forks::BankForks},
@@ -111,6 +115,7 @@ impl BamReceiveAndBuffer {
         bank_forks: Arc<RwLock<BankForks>>,
         shared_leader_state: Option<SharedLeaderState>,
         blacklisted_accounts: HashSet<Pubkey>,
+        circular_export_sender: Option<CircularExportSender>,
     ) -> Self {
         let (parsed_batch_sender, parsed_batch_receiver) =
             crossbeam_channel::unbounded::<ParsedBatch>();
@@ -136,6 +141,7 @@ impl BamReceiveAndBuffer {
                 blacklisted_accounts,
                 #[cfg(test)]
                 replacement_wait_sender,
+                circular_export_sender,
             )
         });
 
@@ -167,6 +173,7 @@ impl BamReceiveAndBuffer {
         shared_leader_state: Option<SharedLeaderState>,
         blacklisted_accounts: HashSet<Pubkey>,
         #[cfg(test)] replacement_wait_sender: crossbeam_channel::Sender<()>,
+        circular_export_sender: Option<CircularExportSender>,
     ) {
         let sigverify_thread_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(2)
@@ -272,6 +279,35 @@ impl BamReceiveAndBuffer {
                         metrics
                             .sigverify_metrics
                             .increment_total_batches_verified(1);
+
+                        // Circular: 4.2.2 no longer builds a PacketBatch in
+                        // batch_verify. Reconstruct one from the sanitized
+                        // views so the exporter still sees post-sigverify
+                        // wire bytes. Vote filtering runs on circExporter.
+                        if let Some(exporter) = circular_export_sender.as_ref() {
+                            let packets: Vec<BytesPacket> = verified_batch
+                                .iter()
+                                .map(|result| {
+                                    let Ok((view, is_simple_vote)) = result else {
+                                        unreachable!(
+                                            "signature failures are handled before export"
+                                        );
+                                    };
+                                    let data = Bytes::copy_from_slice(view.data());
+                                    let mut meta = Meta::default();
+                                    meta.size = data.len();
+                                    let mut packet = BytesPacket::new(data, meta);
+                                    if *is_simple_vote {
+                                        packet.meta_mut().flags.insert(PacketFlags::SIMPLE_VOTE_TX);
+                                    }
+                                    packet
+                                })
+                                .collect();
+                            exporter.export_bam_shared(
+                                Arc::new(vec![PacketBatch::from(packets)]),
+                                revert_on_error,
+                            );
+                        }
 
                         let ((parse_result, parse_stats), duration_us) =
                             measure_us!(Self::parse_batch(
@@ -1294,6 +1330,7 @@ pub(super) mod tests {
             bank_forks,
             shared_leader_state,
             blacklisted_accounts,
+            None,
         );
         let container = TransactionStateContainer::with_capacity(100);
         (exit, receive_and_buffer, container, response_receiver)
