@@ -1158,8 +1158,10 @@ mod test {
     #[test]
     fn circular_fast_export_enablement_and_defaults() {
         // Env is process-global; clear any ambient key so the assertions are
-        // deterministic (validator crate is edition 2021, so this is safe).
-        std::env::remove_var("CIRCULAR_FAST_API_KEY");
+        // deterministic. `remove_var` is unsafe since Rust 1.94 (data races
+        // with other threads reading the environment).
+        // SAFETY: test-only, single-threaded for this env key.
+        unsafe { std::env::remove_var("CIRCULAR_FAST_API_KEY") };
 
         // No key and no flags: exporter disabled.
         assert!(
@@ -1204,7 +1206,8 @@ mod test {
 
     #[test]
     fn circular_fast_api_key_direct_arg() {
-        std::env::remove_var("CIRCULAR_FAST_API_KEY");
+        // SAFETY: test-only, single-threaded for this env key.
+        unsafe { std::env::remove_var("CIRCULAR_FAST_API_KEY") };
 
         // The API key can be passed directly on the command line, trimmed
         // just like the file-based form.
