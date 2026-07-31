@@ -40,6 +40,7 @@ use {
     agave_xdp::transmitter::XdpSender,
     ahash::HashSet as AHashSet,
     arc_swap::ArcSwap,
+    circular_transaction_exporter::{CircularExportConfig, CircularTransactionExporter},
     crossbeam_channel::{Receiver, bounded},
     solana_clock::Slot,
     solana_gossip::cluster_info::ClusterInfo,
@@ -136,6 +137,7 @@ pub struct Tpu {
     bundle_stage: BundleStage,
     bundle_sigverify_stage: BundleSigverifyStage,
     bam_manager: BamManager,
+    circular_transaction_exporter: Option<CircularTransactionExporter>,
 }
 
 impl Tpu {
@@ -196,6 +198,7 @@ impl Tpu {
         bam_shred_receiver_addresses: Arc<ArcSwap<ShredReceiverAddresses>>,
         multicast_receiver_address: Arc<ArcSwap<Option<SocketAddr>>>,
         bam_url: Arc<ArcSwap<Option<String>>>,
+        circular_export_config: Option<CircularExportConfig>,
     ) -> Self {
         let TpuSockets {
             vote: tpu_vote_sockets,
@@ -326,6 +329,21 @@ impl Tpu {
         // below-floor packets ahead of signature verification.
         let scheduler_priority_floor = Arc::new(SchedulerPriorityFloor::new());
 
+        // Circular: exporter sur thread dédié
+        let (circular_export_sender, circular_transaction_exporter) = match circular_export_config {
+            Some(config) => {
+                log::info!(
+                    "circular exporter: submitting verified transactions to Fast at {} (max_in_flight={})",
+                    config.url,
+                    config.max_in_flight
+                );
+                let (sender, exporter) =
+                    CircularTransactionExporter::spawn(config, cluster_info.id().to_string());
+                (Some(sender), Some(exporter))
+            }
+            None => (None, None),
+        };
+
         let (sigverify_stage, gossip_sigverify_handle) = SigVerifyStage::new(
             sigverify_stage_receiver,
             vote_packet_receiver,
@@ -336,6 +354,7 @@ impl Tpu {
             enable_block_production_forwarding,
             bank_forks.read().unwrap().sharable_banks(),
             Some(scheduler_priority_floor.clone()),
+            circular_export_sender.clone(),
         );
 
         let sigverify_threadpool = Arc::new(
@@ -371,6 +390,7 @@ impl Tpu {
             unverified_bundle_receiver,
             verified_bundle_sender,
             exit.clone(),
+            circular_export_sender.clone(),
         );
 
         let bam_tpu_info = Arc::new(ArcSwap::new(Arc::new(None)));
@@ -424,6 +444,7 @@ impl Tpu {
             batch_sender: bam_batch_sender,
             batch_receiver: bam_batch_receiver,
             outbound_sender: bam_outbound_sender,
+            circular_export_sender,
             cluster_info: cluster_info.clone(),
             block_builder_fee_info: Arc::new(ArcSwap::from_pointee(BlockBuilderFeeInfo::default())),
             bam_node_pubkey: Arc::new(ArcSwap::from_pointee(Pubkey::default())),
@@ -561,6 +582,7 @@ impl Tpu {
             bundle_stage,
             bundle_sigverify_stage,
             bam_manager,
+            circular_transaction_exporter,
         }
     }
 
@@ -582,6 +604,10 @@ impl Tpu {
             self.fetch_stage_manager.join(),
             self.bam_manager.join(),
         ];
+        if let Some(circular_transaction_exporter) = self.circular_transaction_exporter {
+            // Senders are gone with banking/bam_manager; drain and join.
+            circular_transaction_exporter.join()?;
+        }
         let broadcast_result = self.broadcast_stage.join();
         for result in results {
             result?;

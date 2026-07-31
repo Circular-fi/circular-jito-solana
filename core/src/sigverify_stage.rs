@@ -13,6 +13,7 @@ use {
         },
     },
     agave_banking_stage_ingress_types::{BankingPacketBatch, SchedulerPriorityFloor},
+    circular_transaction_exporter::CircularExportSender,
     core::time::Duration,
     crossbeam_channel::{Receiver, Sender, unbounded},
     solana_perf::{deduper::Deduper, packet::PacketBatch},
@@ -147,6 +148,7 @@ impl SigVerifierStats {
 }
 
 impl SigVerifyStage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         packet_receiver: Receiver<PacketBatch>,
         vote_packet_receiver: Receiver<PacketBatch>,
@@ -157,6 +159,7 @@ impl SigVerifyStage {
         forward_non_votes: bool,
         sharable_banks: SharableBanks,
         scheduler_priority_floor: Option<Arc<SchedulerPriorityFloor>>,
+        circular_export_sender: Option<CircularExportSender>,
     ) -> (Self, GossipSigVerifyHandle) {
         let (gossip_verified_vote_sender, verified_vote_receiver) = unbounded();
         let non_vote_stats = SigVerifierStats::default();
@@ -217,6 +220,7 @@ impl SigVerifyStage {
                 },
                 None, // votes are not dropped for priority-floor
             ),
+            circular_export_sender,
         );
         let servicer_thread_hdl = Self::servicer(
             exit.clone(),
@@ -425,6 +429,7 @@ mod tests {
             false,
             sharable_banks,
             None,
+            None,
         );
 
         let now = Instant::now();
@@ -499,6 +504,7 @@ mod tests {
             NonZeroUsize::new(1).unwrap(),
             false,
             sharable_banks,
+            None,
             None,
         );
 
