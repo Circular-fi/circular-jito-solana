@@ -136,8 +136,7 @@ async fn run_exporter(
 
     // Bridge the blocking crossbeam queue into the async world. Ends when
     // every CircularExportSender is dropped (validator shutdown).
-    let (bridge_sender, mut bridge_receiver) =
-        mpsc::channel::<ExportItem>(BRIDGE_CHANNEL_CAPACITY);
+    let (bridge_sender, mut bridge_receiver) = mpsc::channel::<ExportItem>(BRIDGE_CHANNEL_CAPACITY);
     let queue_receiver = batch_receiver.clone();
     let bridge_task = tokio::task::spawn_blocking(move || {
         while let Ok(batch) = queue_receiver.recv() {
@@ -279,7 +278,9 @@ impl SubmitContext {
         // Backpressure valve: if all in-flight slots are busy (Fast slow or
         // down), drop rather than queue. The validator is never held back.
         let Ok(permit) = self.in_flight.clone().try_acquire_owned() else {
-            self.metrics.dropped_no_permit.fetch_add(1, Ordering::Relaxed);
+            self.metrics
+                .dropped_no_permit
+                .fetch_add(1, Ordering::Relaxed);
             return;
         };
 
@@ -336,6 +337,10 @@ fn build_channel(config: &CircularExportConfig) -> Result<Channel, Box<dyn std::
     let mut endpoint = Endpoint::from_shared(config.url.clone())?
         .connect_timeout(config.connect_timeout)
         .tcp_nodelay(true)
+        .http2_keep_alive_interval(Duration::from_secs(30))
+        .keep_alive_timeout(Duration::from_secs(10))
+        .keep_alive_while_idle(true)
+        .tcp_keepalive(Some(Duration::from_secs(30)))
         .user_agent(format!("circular-jito/{}", env!("CARGO_PKG_VERSION")))?;
 
     if config.url.starts_with("https://") {
