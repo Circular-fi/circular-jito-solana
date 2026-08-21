@@ -122,12 +122,14 @@ async fn run_exporter(
         }
     };
 
-    // Lazy channel: never blocks here and reconnects on demand. A dead Fast
-    // endpoint surfaces as per-call errors, never as a stall.
-    let channel = match build_channel(&config) {
+    // Eager channel: handshake at boot so the first exported tx does not pay
+    // TCP/H2 setup. Tonic still reconnects on later failures; a dead Fast at
+    // boot surfaces here (and as per-call errors afterwards), never as a stall
+    // on the validator hot path.
+    let channel = match build_channel(&config).await {
         Ok(channel) => channel,
         Err(err) => {
-            error!("circular exporter: invalid endpoint {}: {err}", config.url);
+            error!("circular exporter: connect {}: {err}", config.url);
             return;
         }
     };
@@ -333,7 +335,9 @@ impl SubmitContext {
     }
 }
 
-fn build_channel(config: &CircularExportConfig) -> Result<Channel, Box<dyn std::error::Error>> {
+async fn build_channel(
+    config: &CircularExportConfig,
+) -> Result<Channel, Box<dyn std::error::Error>> {
     let mut endpoint = Endpoint::from_shared(config.url.clone())?
         .connect_timeout(config.connect_timeout)
         .tcp_nodelay(true)
@@ -349,6 +353,5 @@ fn build_channel(config: &CircularExportConfig) -> Result<Channel, Box<dyn std::
         warn!("circular exporter: TLS endpoint configured");
     }
 
-    // Never blocks and reconnects transparently on failure.
-    Ok(endpoint.connect_lazy())
+    Ok(endpoint.connect().await?)
 }
