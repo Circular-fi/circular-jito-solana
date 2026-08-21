@@ -53,7 +53,7 @@ Guarantees:
 - a slow or dead Fast endpoint results in counted drops (queue full, no
   in-flight permit, or per-call timeout), never in backpressure on the
   validator;
-- the channel connects lazily and reconnects transparently.
+- the channel connects at exporter boot (`connect().await`) and reconnects transparently.
 
 ## Deduplication
 
