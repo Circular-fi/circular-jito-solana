@@ -1968,7 +1968,7 @@ dependencies = [
 
 [[package]]
 name = "circular-grpc-test-receiver"
-version = "4.2.0-rc.1"
+version = "4.2.1"
 dependencies = [
  "bincode",
  "bs58",
@@ -1990,7 +1990,7 @@ dependencies = [
 
 [[package]]
 name = "circular-transaction-exporter"
-version = "4.2.0-rc.1"
+version = "4.2.1"
 dependencies = [
  "ahash 0.8.12",
  "criterion",
