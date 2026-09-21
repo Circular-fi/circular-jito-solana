@@ -304,7 +304,7 @@ impl BamReceiveAndBuffer {
                                 })
                                 .collect();
                             exporter.export_bam_shared(
-                                Arc::new(vec![PacketBatch::from(packets)]),
+                                Arc::new(PacketBatch::from(packets)),
                                 revert_on_error,
                             );
                         }
