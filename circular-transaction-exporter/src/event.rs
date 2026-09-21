@@ -111,9 +111,9 @@ pub enum BatchOrigin {
 /// Every packet is always vote-filtered (`SIMPLE_VOTE_TX`) unconditionally,
 /// there is no opt-out.
 pub struct SharedVerifiedBatch {
-    /// The exact `Arc<Vec<PacketBatch>>` also handed to banking stage. Held
+    /// The exact `Arc<PacketBatch>` also handed to banking stage. Held
     /// alive until the exporter thread has extracted the wire bytes.
-    pub batches: Arc<Vec<PacketBatch>>,
+    pub batches: Arc<PacketBatch>,
     /// Which hook produced this batch; drives per-packet [`TransactionSource`]
     /// resolution on the exporter thread.
     pub origin: BatchOrigin,
@@ -129,14 +129,14 @@ pub enum ExportItem {
     Shared(SharedVerifiedBatch),
 }
 
-/// Copy the wire bytes of every valid, non-vote packet out of `batches`. This
+/// Copy the wire bytes of every valid, non-vote packet out of `batch`. This
 /// is the work the legacy owned path performs on the sigverify thread and the
 /// shared path defers to the exporter thread. Vote transactions (batch-level
 /// `is_tpu_vote` or per-packet `SIMPLE_VOTE_TX`) are never forwarded — there
 /// is no opt-in to export them. Returns `None` when no packet survived
 /// verification.
 pub fn build_owned_batch(
-    batches: &[PacketBatch],
+    batch: &PacketBatch,
     is_tpu_vote: bool,
 ) -> Option<(VerifiedPacketBatch, u64)> {
     if is_tpu_vote {
@@ -146,34 +146,32 @@ pub fn build_owned_batch(
     let mut packets = Vec::new();
     let mut copy_bytes = 0u64;
 
-    for packet_batch in batches {
-        for packet in packet_batch.iter() {
-            if packet.meta().discard() {
-                continue;
-            }
-            if packet
-                .meta()
-                .flags
-                .contains(solana_packet::PacketFlags::SIMPLE_VOTE_TX)
-            {
-                continue;
-            }
-            let Some(data) = packet.data(..) else {
-                continue;
-            };
-
-            let source = if packet.meta().forwarded() {
-                TransactionSource::Forwarded
-            } else {
-                TransactionSource::Tpu
-            };
-
-            copy_bytes += data.len() as u64;
-            packets.push(VerifiedPacket {
-                transaction: data.to_vec(),
-                source,
-            });
+    for packet in batch.iter() {
+        if packet.meta().discard() {
+            continue;
         }
+        if packet
+            .meta()
+            .flags
+            .contains(solana_packet::PacketFlags::SIMPLE_VOTE_TX)
+        {
+            continue;
+        }
+        let Some(data) = packet.data(..) else {
+            continue;
+        };
+
+        let source = if packet.meta().forwarded() {
+            TransactionSource::Forwarded
+        } else {
+            TransactionSource::Tpu
+        };
+
+        copy_bytes += data.len() as u64;
+        packets.push(VerifiedPacket {
+            transaction: data.to_vec(),
+            source,
+        });
     }
 
     (!packets.is_empty()).then(|| {

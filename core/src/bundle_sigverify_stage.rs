@@ -132,7 +132,7 @@ impl BundleSigverifyStage {
                     // bundle volume is far lower than the TPU firehose, so a
                     // zero-copy refactor isn't worth it here.
                     if let Some(exporter) = circular_export_sender.as_ref() {
-                        exporter.export_jito_bundle_shared(Arc::new(vec![bundle.clone()]));
+                        exporter.export_jito_bundle_shared(Arc::new(bundle.clone()));
                     }
                     if sender.send(VerifiedPacketBundle::new(bundle)).is_err() {
                         warn!("failed to send verified packet bundle");

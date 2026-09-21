@@ -108,7 +108,7 @@ impl CircularExportSender {
     /// `is_tpu_vote` is set (vote transactions are never exported) or when
     /// `forward_tpu` is disabled.
     #[inline]
-    pub fn export_verified(&self, batches: &Arc<Vec<PacketBatch>>, is_tpu_vote: bool) {
+    pub fn export_verified(&self, batches: &Arc<PacketBatch>, is_tpu_vote: bool) {
         if is_tpu_vote || !self.forward_tpu {
             return;
         }
@@ -155,7 +155,7 @@ impl CircularExportSender {
         }
     }
 
-    /// Shared path: hand the exporter an `Arc<Vec<PacketBatch>>`. The hot path
+    /// Shared path: hand the exporter an `Arc<PacketBatch>`. The hot path
     /// only pays an `Arc` clone plus this enqueue; the wire-byte copy and the
     /// (unconditional) vote filtering happen later, on the exporter thread.
     /// `origin` selects how the exporter resolves the [`TransactionSource`] of
@@ -167,10 +167,10 @@ impl CircularExportSender {
     /// is dropped immediately, so nothing is retained and no copy is ever
     /// scheduled for it.
     #[inline]
-    pub fn try_send_shared(&self, batches: Arc<Vec<PacketBatch>>, origin: BatchOrigin) {
+    pub fn try_send_shared(&self, batches: Arc<PacketBatch>, origin: BatchOrigin) {
         // Packet count only (no wire copy) so Grafana enqueued/dropped match
         // the owned-path semantics on the production Arc path.
-        let transaction_count: u64 = batches.iter().map(|b| b.len() as u64).sum();
+        let transaction_count: u64 = batches.len() as u64;
 
         if self.sender.is_full() {
             self.metrics.dropped_batches.fetch_add(1, Ordering::Relaxed);
@@ -218,7 +218,7 @@ impl CircularExportSender {
     /// transaction (tagged `BAM_TPU`). This is a no-op when `forward_preconf`
     /// is disabled.
     #[inline]
-    pub fn export_bam_shared(&self, batches: Arc<Vec<PacketBatch>>, is_bundle: bool) {
+    pub fn export_bam_shared(&self, batches: Arc<PacketBatch>, is_bundle: bool) {
         if !self.forward_preconf {
             return;
         }
@@ -234,7 +234,7 @@ impl CircularExportSender {
     /// `Arc`) — see `bundle_sigverify_stage.rs` for the call site. This is a
     /// no-op when `forward_jito_bundle` is disabled.
     #[inline]
-    pub fn export_jito_bundle_shared(&self, batches: Arc<Vec<PacketBatch>>) {
+    pub fn export_jito_bundle_shared(&self, batches: Arc<PacketBatch>) {
         if !self.forward_jito_bundle {
             return;
         }
@@ -250,9 +250,10 @@ mod tests {
         std::sync::atomic::Ordering,
     };
 
-    fn make_batches(num_tx: usize) -> Arc<Vec<PacketBatch>> {
+    fn make_batches(num_tx: usize) -> Arc<PacketBatch> {
         let payloads: Vec<Vec<u8>> = (0..num_tx).map(|i| vec![i as u8; 64]).collect();
-        Arc::new(to_packet_batches(&payloads, num_tx.max(1)))
+        let mut batches = to_packet_batches(&payloads, num_tx.max(1));
+        Arc::new(batches.remove(0))
     }
 
     #[test]

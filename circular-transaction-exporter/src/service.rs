@@ -205,34 +205,32 @@ async fn run_exporter(
                     BatchOrigin::JitoBundle => Some(TransactionSource::JitoBundle),
                     BatchOrigin::Tpu => None,
                 };
-                for packet_batch in shared.batches.iter() {
-                    for packet in packet_batch.iter() {
-                        if packet.meta().discard() {
-                            continue;
-                        }
-                        if packet
-                            .meta()
-                            .flags
-                            .contains(solana_packet::PacketFlags::SIMPLE_VOTE_TX)
-                        {
-                            continue;
-                        }
-                        let Some(data) = packet.data(..) else {
-                            continue;
-                        };
-                        if dedup.check_and_insert(data) {
-                            metrics.dropped_duplicates.fetch_add(1, Ordering::Relaxed);
-                            continue;
-                        }
-                        let source = fixed_source.unwrap_or_else(|| {
-                            if packet.meta().forwarded() {
-                                TransactionSource::Forwarded
-                            } else {
-                                TransactionSource::Tpu
-                            }
-                        });
-                        submit_ctx.submit(data.to_vec(), source);
+                for packet in shared.batches.iter() {
+                    if packet.meta().discard() {
+                        continue;
                     }
+                    if packet
+                        .meta()
+                        .flags
+                        .contains(solana_packet::PacketFlags::SIMPLE_VOTE_TX)
+                    {
+                        continue;
+                    }
+                    let Some(data) = packet.data(..) else {
+                        continue;
+                    };
+                    if dedup.check_and_insert(data) {
+                        metrics.dropped_duplicates.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
+                    let source = fixed_source.unwrap_or_else(|| {
+                        if packet.meta().forwarded() {
+                            TransactionSource::Forwarded
+                        } else {
+                            TransactionSource::Tpu
+                        }
+                    });
+                    submit_ctx.submit(data.to_vec(), source);
                 }
             }
         }

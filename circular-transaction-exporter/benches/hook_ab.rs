@@ -4,7 +4,7 @@
 //! - `copy`: [`build_owned_batch`] copies every wire payload into an owned
 //!   `VerifiedPacketBatch` (the legacy `try_send` path);
 //! - `arc`: [`CircularExportSender::try_send_shared`] only clones the shared
-//!   `Arc<Vec<PacketBatch>>` and defers the copy to the exporter thread.
+//!   `Arc<PacketBatch>` and defers the copy to the exporter thread.
 //!
 //! Two scenarios matter for a mainnet spike:
 //! - `queue_ok`: the exporter keeps up, the queue has room;
@@ -20,13 +20,14 @@ use {
     std::{hint::black_box, sync::Arc, thread},
 };
 
-/// Build one `Arc<Vec<PacketBatch>>` of `num_tx` packets of ~`tx_size` bytes,
+/// Build one `Arc<PacketBatch>` of `num_tx` packets of ~`tx_size` bytes,
 /// mirroring what sigverify hands downstream.
-fn make_batches(num_tx: usize, tx_size: usize) -> Arc<Vec<PacketBatch>> {
+fn make_batches(num_tx: usize, tx_size: usize) -> Arc<PacketBatch> {
     let payloads: Vec<Vec<u8>> = (0..num_tx)
         .map(|index| vec![(index % 251) as u8; tx_size])
         .collect();
-    Arc::new(to_packet_batches(&payloads, num_tx.max(1)))
+    let mut batches = to_packet_batches(&payloads, num_tx.max(1));
+    Arc::new(batches.remove(0))
 }
 
 fn bench_handoff(c: &mut Criterion) {
