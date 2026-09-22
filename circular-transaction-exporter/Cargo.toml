@@ -46,6 +46,10 @@ required-features = ["dev-context-only-utils"]
 name = "burst_and_metrics"
 required-features = ["dev-context-only-utils"]
 
+[[test]]
+name = "reconnect"
+required-features = ["dev-context-only-utils"]
+
 [build-dependencies]
 tonic-prost-build = { workspace = true }
 

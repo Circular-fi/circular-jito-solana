@@ -2,7 +2,7 @@ use {
     crate::{
         config::{self, CircularExportConfig},
         dedup::ExportDedup,
-        event::{BatchOrigin, ExportItem, TransactionSource},
+        event::{BatchOrigin, ExportItem, TransactionSource, unix_nanos_now},
         metrics::CircularExportMetrics,
         proto::{SendTransactionRequest, fast_tx_client::FastTxClient},
         sender::CircularExportSender,
@@ -31,6 +31,14 @@ const BRIDGE_CHANNEL_CAPACITY: usize = 16;
 const METRICS_REPORT_INTERVAL: Duration = Duration::from_secs(2);
 /// How long to wait for in-flight submissions to drain on shutdown.
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+/// First delay between failed connection attempts; doubles on each failure up
+/// to [`RECONNECT_BACKOFF_MAX`].
+const RECONNECT_BACKOFF_INITIAL: Duration = Duration::from_millis(500);
+/// Cap on the delay between failed connection attempts.
+const RECONNECT_BACKOFF_MAX: Duration = Duration::from_secs(30);
+/// Granularity at which the reconnect backoff checks for shutdown, so a
+/// dropped sender is noticed promptly even mid-backoff.
+const RECONNECT_SHUTDOWN_POLL: Duration = Duration::from_millis(100);
 
 /// Background service owning the exporter thread. Dropping the last
 /// [`CircularExportSender`] lets the thread drain and exit; call [`join`]
@@ -117,39 +125,23 @@ async fn run_exporter(
     let api_key: MetadataValue<Ascii> = match config.api_key.parse() {
         Ok(value) => value,
         Err(err) => {
+            // A malformed key never repairs itself: retrying is pointless, so
+            // this is the one path that stays a permanent, clearly-labelled
+            // exit (distinct from a network outage, which is retried below).
             error!("circular exporter: invalid API key, exporter disabled: {err}");
             return;
         }
     };
 
-    // Eager channel: handshake at boot so the first exported tx does not pay
-    // TCP/H2 setup. Tonic still reconnects on later failures; a dead Fast at
-    // boot surfaces here (and as per-call errors afterwards), never as a stall
-    // on the validator hot path.
-    let channel = match build_channel(&config).await {
-        Ok(channel) => channel,
-        Err(err) => {
-            error!("circular exporter: connect {}: {err}", config.url);
-            return;
-        }
-    };
-    let client = FastTxClient::new(channel);
     let in_flight = Arc::new(Semaphore::new(config.max_in_flight));
 
-    // Bridge the blocking crossbeam queue into the async world. Ends when
-    // every CircularExportSender is dropped (validator shutdown).
-    let (bridge_sender, mut bridge_receiver) = mpsc::channel::<ExportItem>(BRIDGE_CHANNEL_CAPACITY);
-    let queue_receiver = batch_receiver.clone();
-    let bridge_task = tokio::task::spawn_blocking(move || {
-        while let Ok(batch) = queue_receiver.recv() {
-            if bridge_sender.blocking_send(batch).is_err() {
-                break;
-            }
-        }
-    });
-
+    // Start the metrics reporter *before* connecting, so the `connected=0`
+    // gauge and `reconnect_attempts` counter stay visible to operators
+    // throughout an outage — including one that spans the whole validator
+    // boot, which is exactly when the exporter used to go silently offline.
     let reporter_metrics = metrics.clone();
     let reporter_in_flight = in_flight.clone();
+    let reporter_receiver = batch_receiver.clone();
     let queue_capacity = config.queue_capacity;
     let max_in_flight = config.max_in_flight;
     let reporter_task = tokio::spawn(async move {
@@ -157,7 +149,33 @@ async fn run_exporter(
         loop {
             interval.tick().await;
             let live = max_in_flight.saturating_sub(reporter_in_flight.available_permits());
-            reporter_metrics.report(batch_receiver.len(), queue_capacity, live);
+            reporter_metrics.report(reporter_receiver.len(), queue_capacity, live);
+        }
+    });
+
+    // Eager channel: handshake at boot so the first exported tx does not pay
+    // TCP/H2 setup (this is what keeps the send rate smooth, no initial
+    // burst). Unlike a single attempt, a transient failure at boot (DNS,
+    // route, gRPC handshake) must NOT permanently disable the exporter: retry
+    // with capped exponential backoff until connected, or until the validator
+    // shuts down. Tonic still reconnects transparently on later per-call
+    // failures once the channel exists.
+    let Some(channel) = connect_with_backoff(&config, &metrics, &batch_receiver).await else {
+        info!("circular exporter: shut down before initial connection");
+        reporter_task.abort();
+        return;
+    };
+    let client = FastTxClient::new(channel);
+
+    // Bridge the blocking crossbeam queue into the async world. Ends when
+    // every CircularExportSender is dropped (validator shutdown).
+    let (bridge_sender, mut bridge_receiver) = mpsc::channel::<ExportItem>(BRIDGE_CHANNEL_CAPACITY);
+    let queue_receiver = batch_receiver;
+    let bridge_task = tokio::task::spawn_blocking(move || {
+        while let Ok(batch) = queue_receiver.recv() {
+            if bridge_sender.blocking_send(batch).is_err() {
+                break;
+            }
         }
     });
 
@@ -316,6 +334,11 @@ impl SubmitContext {
                     metrics
                         .sent_bytes
                         .fetch_add(transaction_bytes, Ordering::Relaxed);
+                    // Health signal: timestamp of the last accepted submission,
+                    // drives `secs_since_last_successful_send`.
+                    metrics
+                        .last_send_unix_nanos
+                        .store(unix_nanos_now(), Ordering::Relaxed);
                 }
                 Ok(Err(status)) => {
                     metrics.sent_err.fetch_add(1, Ordering::Relaxed);
@@ -352,4 +375,89 @@ async fn build_channel(
     }
 
     Ok(endpoint.connect().await?)
+}
+
+/// Establish the gRPC channel, retrying with capped exponential backoff and
+/// jitter until it succeeds. Returns `None` if the validator shuts down (all
+/// [`CircularExportSender`]s dropped, detected via `batch_receiver`) before a
+/// connection is made, so the exporter thread can exit cleanly instead of
+/// hanging.
+///
+/// This is the fix for the availability bug where a single failed connection
+/// at boot permanently disabled the exporter with no recovery.
+async fn connect_with_backoff(
+    config: &CircularExportConfig,
+    metrics: &Arc<CircularExportMetrics>,
+    batch_receiver: &crossbeam_channel::Receiver<ExportItem>,
+) -> Option<Channel> {
+    let mut backoff = RECONNECT_BACKOFF_INITIAL;
+    let mut attempt: u64 = 0;
+    loop {
+        match build_channel(config).await {
+            Ok(channel) => {
+                metrics.connected.store(1, Ordering::Relaxed);
+                if attempt > 0 {
+                    info!(
+                        "circular exporter: connected to Fast at {} after {attempt} failed \
+                         attempt(s)",
+                        config.url
+                    );
+                }
+                return Some(channel);
+            }
+            Err(err) => {
+                metrics.connected.store(0, Ordering::Relaxed);
+                metrics.reconnect_attempts.fetch_add(1, Ordering::Relaxed);
+                attempt = attempt.saturating_add(1);
+                warn!(
+                    "circular exporter: connect {} failed (attempt {attempt}): {err}; retrying \
+                     in ~{backoff:?}",
+                    config.url
+                );
+                if wait_or_shutdown(batch_receiver, with_jitter(backoff)).await {
+                    return None;
+                }
+                backoff = (backoff * 2).min(RECONNECT_BACKOFF_MAX);
+            }
+        }
+    }
+}
+
+/// Sleep for `duration`, but return `true` early as soon as every sender has
+/// been dropped (validator shutdown). Any batches queued during the outage are
+/// drained and discarded — they cannot be sent, and the bounded queue would
+/// drop them anyway; draining is also what lets us observe the disconnected
+/// state of the channel promptly.
+async fn wait_or_shutdown(
+    batch_receiver: &crossbeam_channel::Receiver<ExportItem>,
+    duration: Duration,
+) -> bool {
+    let deadline = Instant::now() + duration;
+    loop {
+        // Drain everything currently queued; a `Disconnected` result means all
+        // senders are gone (shutdown), an `Empty` result means keep waiting.
+        loop {
+            match batch_receiver.try_recv() {
+                Ok(_) => continue,
+                Err(crossbeam_channel::TryRecvError::Empty) => break,
+                Err(crossbeam_channel::TryRecvError::Disconnected) => return true,
+            }
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        let slice = RECONNECT_SHUTDOWN_POLL.min(deadline - now);
+        tokio::time::sleep(slice).await;
+    }
+}
+
+/// Add up to +25% jitter to a backoff delay so many validators reconnecting at
+/// once do not synchronize, without pulling in an RNG crate: derived from the
+/// low bits of the wall clock.
+fn with_jitter(base: Duration) -> Duration {
+    let base_ms = base.as_millis() as u64;
+    let span = base_ms / 4 + 1;
+    let jitter = unix_nanos_now() % span;
+    base + Duration::from_millis(jitter)
 }
