@@ -1,6 +1,9 @@
 use {
     solana_metrics::datapoint_info,
-    std::sync::atomic::{AtomicU64, Ordering},
+    std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    },
 };
 
 /// Counters shared between the sigverify hook, the export queue and the Fast
@@ -38,6 +41,18 @@ pub struct CircularExportMetrics {
     /// Current number of distinct transactions tracked by the dedup table.
     /// A gauge, not a cumulative counter: reported as-is, never reset.
     pub dedup_table_size: AtomicU64,
+    /// Health gauge: `1` once the exporter has an established gRPC channel,
+    /// `0` while it is (re)connecting. Reported as-is, never reset. This is
+    /// the operator-visible signal that the exporter is enabled but offline.
+    pub connected: AtomicU64,
+    /// Number of failed connection attempts since the last report. A counter,
+    /// reset every report window. Non-zero means the endpoint is flapping or
+    /// unreachable.
+    pub reconnect_attempts: AtomicU64,
+    /// Unix nanoseconds of the last `SendTransaction` accepted by Fast. A
+    /// gauge, never reset; drives `secs_since_last_successful_send`. `0` means
+    /// nothing has ever been sent successfully.
+    pub last_send_unix_nanos: AtomicU64,
 }
 
 impl CircularExportMetrics {
@@ -101,6 +116,33 @@ impl CircularExportMetrics {
             ("queue_depth", queue_depth as i64, i64),
             ("queue_capacity", queue_capacity as i64, i64),
             ("in_flight", in_flight as i64, i64),
+            ("connected", self.connected.load(Ordering::Relaxed) as i64, i64),
+            (
+                "reconnect_attempts",
+                self.reconnect_attempts.swap(0, Ordering::Relaxed),
+                i64
+            ),
+            (
+                "secs_since_last_successful_send",
+                self.secs_since_last_successful_send(),
+                i64
+            ),
         );
+    }
+
+    /// Seconds elapsed since the last `SendTransaction` accepted by Fast, or
+    /// `-1` if none has ever succeeded. A steadily growing value while
+    /// transactions are being received is the durable signal that the
+    /// exporter is offline (endpoint dead, disconnected, or stalled).
+    fn secs_since_last_successful_send(&self) -> i64 {
+        let last = self.last_send_unix_nanos.load(Ordering::Relaxed);
+        if last == 0 {
+            return -1;
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos() as u64)
+            .unwrap_or_default();
+        (now.saturating_sub(last) / 1_000_000_000) as i64
     }
 }
