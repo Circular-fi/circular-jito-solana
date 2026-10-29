@@ -25,7 +25,7 @@ solana-packet = { workspace = true }
 solana-perf = { workspace = true }
 tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
 tokio-stream = { workspace = true }
-tonic = { workspace = true, features = ["tls-ring", "tls-native-roots", "transport"] }
+tonic = { workspace = true, features = ["codegen", "router", "tls-ring", "tls-native-roots", "transport"] }
 tonic-prost = { workspace = true }
 
 [dev-dependencies]

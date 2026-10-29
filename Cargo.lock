@@ -1930,7 +1930,7 @@ dependencies = [
 
 [[package]]
 name = "circular-grpc-test-receiver"
-version = "4.2.0-rc.1"
+version = "4.4.0-rc.1"
 dependencies = [
  "bincode",
  "bs58",
@@ -1939,7 +1939,7 @@ dependencies = [
  "serde_json",
  "solana-client",
  "solana-connection-cache",
- "solana-hash 4.4.0",
+ "solana-hash",
  "solana-keypair",
  "solana-rpc-client",
  "solana-sha256-hasher",
@@ -1952,7 +1952,7 @@ dependencies = [
 
 [[package]]
 name = "circular-transaction-exporter"
-version = "4.2.0-rc.1"
+version = "4.4.0-rc.1"
 dependencies = [
  "ahash 0.8.12",
  "criterion",
@@ -1960,7 +1960,7 @@ dependencies = [
  "log",
  "prost 0.14.4",
  "solana-metrics",
- "solana-packet 4.1.0",
+ "solana-packet",
  "solana-perf",
  "tokio",
  "tokio-stream",
